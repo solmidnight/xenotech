@@ -7,7 +7,7 @@ use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
-    utils::{hashbrown::HashSet, HashMap},
+    utils::{hashbrown::{HashSet}, HashMap},
 };
 use bevy_xpbd_2d::{parry::na::ComplexField, prelude::*};
 use bitflags::bitflags;
@@ -319,7 +319,7 @@ fn thruster_alloc(
     mut query: Query<(
         &Object,
         &Input,
-        &Transform,
+        &GlobalTransform,
         &CenterOfMass,
         &mut LinearVelocity,
         &mut AngularVelocity,
@@ -328,6 +328,8 @@ fn thruster_alloc(
     )>,
 ) {
     for (o, i, t, com, mut v, mut a, mut ef, mut et) in query.iter_mut() {
+        let r = t.to_scale_rotation_translation().1;
+
         let mut available_thrusters = HashMap::new();
 
         for x in o.minimum.x..o.maximum.x {
@@ -352,7 +354,7 @@ fn thruster_alloc(
         const MAX_V_MAG: f32 = 50.0;
         const MAX_A: f32 = PI / 2.0;
         const R: f32 = 0.99;
-        const F: f32 = 1.0;
+        const F: f32 = 10000.0;
         const TF: f32 = 1200.0;
 
         if v_mag > MAX_V_MAG * d_mag {
@@ -370,27 +372,12 @@ fn thruster_alloc(
         }
 
         if i.direction != Vec2::default() {
-            desired_force = F * (t.rotation * i.direction.extend(0.)).xy();
+            desired_force = F * (r * (i.direction).extend(0.)).xy();
             should_thrust = true;
         }
 
         if !should_thrust {
-            // let rev_t = F * -a.0.signum();
-            // let rev_f = F * -(r.inverse() * v.0);
-
-            // if a.0.abs() > EPSILON {
-            //     desired_torque = rev_t;
-            //     should_thrust = true;
-            // } else {
-            //     a.0 = default();
-            // }
-
-            // if desired_torque == 0.0 && v.0.length() > EPSILON {
-            //     desired_force = rev_f;
-            //     should_thrust = true;
-            // } else {
-            //     v.0 = default();
-            // }
+            
         }
 
         if should_thrust {
@@ -404,13 +391,13 @@ fn thruster_alloc(
                             && desired_torque == 0.0
                             && i.direction != Vec2::ZERO
                         {
-                            force_scaling = i.direction.dot(desired_force);
+                            force_scaling = i.direction.dot(direction.as_vec());
                         } else {
                             force_scaling = i.rotate.abs().clamp(0.0, 1.0);
                         }
                         let mut force = ExternalForce::default();
                         force.apply_force_at_point(
-                            force_scaling * (t.rotation * direction.as_vec().extend(0.)).xy(),
+                            force_scaling * (r * direction.as_vec().extend(0.)).xy(),
                             pos.as_vec2() + 0.5,
                             com.0,
                         );
@@ -455,8 +442,9 @@ fn thruster_alloc(
 
             if let Some(i) = index {
                 let mut force = ExternalForce::default().with_persistence(false);
+                dbg!(&thrusters_in_combo[i]);
                 for thruster in &thrusters_in_combo[i] {
-                    force.apply_force_at_point( TF * thruster.1.force(), thruster.0.as_vec2() + 0.5, com.0);
+                    force.apply_force_at_point(TF * thruster.1.force(), thruster.0.as_vec2() + 0.5, com.0);
                 }
                 *ef = force;
             }
