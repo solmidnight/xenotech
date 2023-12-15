@@ -7,11 +7,12 @@ use bevy::{
     prelude::*,
     render::{mesh::Indices, render_resource::PrimitiveTopology},
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
-    utils::{hashbrown::{HashSet}, HashMap},
+    utils::{hashbrown::{HashSet}, HashMap}, ecs::system::EntityCommands,
 };
 use bevy_xpbd_2d::{parry::na::ComplexField, prelude::*};
 use bitflags::bitflags;
 use itertools::Itertools;
+use rand::thread_rng;
 
 bitflags! {
     #[derive(PartialEq, Eq, Hash, Clone, Copy, Default, Debug)]
@@ -47,6 +48,7 @@ impl Direction {
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Cell {
     Metal,
+    Stone,
     Thruster(Direction),
 }
 
@@ -54,6 +56,7 @@ impl Cell {
     fn color(&self) -> [f32; 4] {
         match self {
             Self::Metal => [0.8, 0.8, 0.8, 1.0],
+            Self::Stone => [0.4, 0.4, 0.4, 1.0],
             Self::Thruster(_) => [0.0, 0.0, 0.8, 1.0],
         }
     }
@@ -112,7 +115,6 @@ fn create_object_mesh(object: &Object) -> MeshData {
                 }
             }
         }
-        dbg!(&visited, object.minimum, object.maximum);
 
         let template = object.data[&cursor].clone();
         while object.data.contains_key(&(cursor + size))
@@ -170,8 +172,10 @@ fn create_object_mesh(object: &Object) -> MeshData {
                 y = y * size.y as f32 + pos.y as f32;
                 [x, y, z]
             }));
+            let mut rng = thread_rng();
+            use rand::Rng;
             indices.extend(TEMPLATE_INDICES.iter().copied().map(|i| i + count as u32));
-            colors.extend(iter::repeat(cell.color()).take(TEMPLATE_VERTICES.len()));
+            colors.extend(iter::repeat(cell.color()).map(|x| [x[0] * rng.gen::<f32>(), x[1] * rng.gen::<f32>(), x[2] * rng.gen::<f32>(), x[3]]).take(TEMPLATE_VERTICES.len()));
         }
     }
 
@@ -188,37 +192,10 @@ pub struct MeshData {
     colors: Vec<[f32; 4]>,
 }
 
-fn setup(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-) {
-    let mut camera_transform = Transform::from_xyz(0.0, 0.0, 100.0);
-    camera_transform.look_at(Vec3::ZERO, Vec3::Y);
-    let camera_id = commands
-        .spawn(Camera2dBundle {
-            transform: camera_transform,
-            projection: OrthographicProjection {
-                scale: 0.15,
-                ..default()
-            },
-            ..default()
-        })
-        .id();
-
-    let mut data = HashMap::new();
-    data.insert(IVec2::new(0, 1), Cell::Metal);
-    data.insert(IVec2::new(1, 1), Cell::Metal);
-    data.insert(IVec2::new(2, 1), Cell::Metal);
-    data.insert(IVec2::new(0, 0), Cell::Thruster(Direction::UP));
-    data.insert(IVec2::new(2, 0), Cell::Thruster(Direction::UP));
-    data.insert(IVec2::new(0, 2), Cell::Thruster(Direction::DOWN));
-    data.insert(IVec2::new(2, 2), Cell::Thruster(Direction::DOWN));
-    data.insert(IVec2::new(-1, 1), Cell::Thruster(Direction::LEFT));
-    data.insert(IVec2::new(3, 1), Cell::Thruster(Direction::RIGHT));
-    let mut object = Object { data, ..default() };
-    object.calc_bounds();
-
+fn spawn_object(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>, object: Object, transform: Transform) -> Entity {
     let MeshData {
         vertices,
         indices,
@@ -255,30 +232,91 @@ fn setup(
         .spawn((
             Input::default(),
             RigidBody::Dynamic,
-            ExternalForce::default(),
-            ExternalTorque::default(),
-            LinearVelocity::default(),
-            AngularVelocity::default(),
             object,
             collider.clone(),
             MaterialMesh2dBundle {
                 mesh: Mesh2dHandle(mesh.clone()),
                 material: material.clone(),
-                transform: Transform::from_xyz(10.0, 0.0, 0.0),
+                transform,
                 ..default()
             },
-        ))
-        .add_child(camera_id);
-    commands.spawn((
-        RigidBody::Dynamic,
-        collider,
-        MaterialMesh2dBundle {
-            mesh: Mesh2dHandle(mesh),
-            material,
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+        )).id()
+}
+
+fn setup(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let mut camera_transform = Transform::from_xyz(0.0, 0.0, 100.0);
+    camera_transform.look_at(Vec3::ZERO, Vec3::Y);
+    let camera_id = commands
+        .spawn(Camera2dBundle {
+            transform: camera_transform,
+            projection: OrthographicProjection {
+                scale: 0.15,
+                ..default()
+            },
             ..default()
-        },
-    ));
+        })
+        .id();
+
+    let mut data = HashMap::new();
+    data.insert(IVec2::new(0, 1), Cell::Metal);
+    data.insert(IVec2::new(1, 1), Cell::Metal);
+    data.insert(IVec2::new(2, 1), Cell::Metal);
+    data.insert(IVec2::new(0, 0), Cell::Thruster(Direction::UP));
+    data.insert(IVec2::new(2, 0), Cell::Thruster(Direction::UP));
+    data.insert(IVec2::new(0, 2), Cell::Thruster(Direction::DOWN));
+    data.insert(IVec2::new(2, 2), Cell::Thruster(Direction::DOWN));
+    data.insert(IVec2::new(-1, 1), Cell::Thruster(Direction::LEFT));
+    data.insert(IVec2::new(3, 1), Cell::Thruster(Direction::RIGHT));
+    let mut object = Object { data, ..default() };
+    object.calc_bounds();
+
+    let ship_entity = spawn_object(&mut commands, &mut materials, &mut meshes, object, Transform::from_xyz(0.0, 0.0, 0.0));
+
+    commands.entity(ship_entity).add_child(camera_id);
+    
+    fn generate_asteroid_object() -> Object {
+        use rand::Rng;
+        use noise::*;
+
+        let mut rng = thread_rng();
+
+        let noise = Fbm::<Perlin>::new(rng.gen());
+
+        let radius = rng.gen_range(10..20);
+        let x2_radius = 2 * radius;
+    
+        let mut object = Object::default();
+
+        for x in -x2_radius..=x2_radius {
+            for y in -x2_radius..=x2_radius {
+                let diff = radius as f32 - IVec2 { x, y }.as_vec2().length();
+                const SQUISH: f32 = 0.3;
+
+                let density_mod = SQUISH * diff;
+
+                let density = noise.get([x as f64 * 0.1, y as f64 * 0.1]) as f32;
+
+                if density + density_mod > 0.0 {
+                    object.data.insert(IVec2 { x, y }, Cell::Stone);
+                }
+            }
+        }
+        object.calc_bounds();
+        object
+    }
+
+    for i in 0..20 {
+        use rand::Rng;
+
+        let mut rng = thread_rng();
+
+        spawn_object(&mut commands, &mut materials, &mut meshes, generate_asteroid_object(), Transform::from_xyz(400.0 * rng.gen::<f32>() - 200.0, 400.0 * rng.gen::<f32>() - 200.0, 0.0));
+    }
+
 }
 
 #[derive(Component, Default, Debug)]
@@ -351,9 +389,8 @@ fn thruster_alloc(
 
         let d_mag = i.direction.length();
 
-        const MAX_V_MAG: f32 = 50.0;
+        const MAX_V_MAG: f32 = 90.0;
         const MAX_A: f32 = PI / 2.0;
-        const R: f32 = 0.99;
         const F: f32 = 10000.0;
         const TF: f32 = 1200.0;
 
@@ -362,9 +399,7 @@ fn thruster_alloc(
         }
         if a.0.abs() > MAX_A * i.rotate.abs() {
             a.0 = MAX_A * i.rotate;
-        } else if v_mag >= 0.0 {
-            a.0 = R * a.0;
-        }
+        } 
 
         if i.rotate != 0.0 {
             desired_torque = F * i.rotate;
