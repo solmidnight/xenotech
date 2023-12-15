@@ -328,8 +328,6 @@ fn thruster_alloc(
     )>,
 ) {
     for (o, i, t, com, mut v, mut a, mut ef, mut et) in query.iter_mut() {
-        let r = Mat2::from_mat3(Mat3::from_quat(t.rotation));
-
         let mut available_thrusters = HashMap::new();
 
         for x in o.minimum.x..o.maximum.x {
@@ -372,27 +370,27 @@ fn thruster_alloc(
         }
 
         if i.direction != Vec2::default() {
-            desired_force = F * i.direction;
+            desired_force = F * (t.rotation * i.direction.extend(0.)).xy();
             should_thrust = true;
         }
 
         if !should_thrust {
-            let rev_t = F * -a.0.signum();
-            let rev_f = F * -(r.inverse() * v.0);
+            // let rev_t = F * -a.0.signum();
+            // let rev_f = F * -(r.inverse() * v.0);
 
-            if a.0.abs() > EPSILON {
-                desired_torque = rev_t;
-                should_thrust = true;
-            } else {
-                a.0 = default();
-            }
+            // if a.0.abs() > EPSILON {
+            //     desired_torque = rev_t;
+            //     should_thrust = true;
+            // } else {
+            //     a.0 = default();
+            // }
 
-            if desired_torque == 0.0 && v.0.length() > EPSILON {
-                desired_force = rev_f;
-                should_thrust = true;
-            } else {
-                v.0 = default();
-            }
+            // if desired_torque == 0.0 && v.0.length() > EPSILON {
+            //     desired_force = rev_f;
+            //     should_thrust = true;
+            // } else {
+            //     v.0 = default();
+            // }
         }
 
         if should_thrust {
@@ -406,13 +404,13 @@ fn thruster_alloc(
                             && desired_torque == 0.0
                             && i.direction != Vec2::ZERO
                         {
-                            force_scaling = i.direction.length().clamp(0.0, 1.0);
+                            force_scaling = i.direction.dot(desired_force);
                         } else {
                             force_scaling = i.rotate.abs().clamp(0.0, 1.0);
                         }
                         let mut force = ExternalForce::default();
                         force.apply_force_at_point(
-                            force_scaling * direction.as_vec(),
+                            force_scaling * (t.rotation * direction.as_vec().extend(0.)).xy(),
                             pos.as_vec2() + 0.5,
                             com.0,
                         );
@@ -458,7 +456,7 @@ fn thruster_alloc(
             if let Some(i) = index {
                 let mut force = ExternalForce::default().with_persistence(false);
                 for thruster in &thrusters_in_combo[i] {
-                    force.apply_force_at_point(r.inverse() * TF * thruster.1.force(), thruster.0.as_vec2() + 0.5, com.0);
+                    force.apply_force_at_point( TF * thruster.1.force(), thruster.0.as_vec2() + 0.5, com.0);
                 }
                 *ef = force;
             }
