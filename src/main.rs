@@ -199,7 +199,7 @@ fn setup(
         .spawn(Camera2dBundle {
             transform: camera_transform,
             projection: OrthographicProjection {
-                scale: 0.2,
+                scale: 0.15,
                 ..default()
             },
             ..default()
@@ -423,10 +423,6 @@ fn thruster_alloc(
                         continue;
                     }
                     force = force.normalize_or_zero();
-                    //-1 -1 0
-                    //-1 1 1
-                    //1 - -1
-                    
                     weighted_outcomes.insert(a, (desired_force.dot(force), (desired_torque - torque).abs(), force));
                 }
                 let mut lowest_weight = f32::MAX;
@@ -442,7 +438,6 @@ fn thruster_alloc(
 
             if let Some(i) = index {
                 let mut force = ExternalForce::default().with_persistence(false);
-                dbg!(&thrusters_in_combo[i]);
                 for thruster in &thrusters_in_combo[i] {
                     force.apply_force_at_point(TF * thruster.1.force(), thruster.0.as_vec2() + 0.5, com.0);
                 }
