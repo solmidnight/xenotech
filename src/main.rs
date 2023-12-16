@@ -172,10 +172,8 @@ fn create_object_mesh(object: &Object) -> MeshData {
                 y = y * size.y as f32 + pos.y as f32;
                 [x, y, z]
             }));
-            let mut rng = thread_rng();
-            use rand::Rng;
             indices.extend(TEMPLATE_INDICES.iter().copied().map(|i| i + count as u32));
-            colors.extend(iter::repeat(cell.color()).map(|x| [x[0] * rng.gen::<f32>(), x[1] * rng.gen::<f32>(), x[2] * rng.gen::<f32>(), x[3]]).take(TEMPLATE_VERTICES.len()));
+            colors.extend(iter::repeat(cell.color()).take(TEMPLATE_VERTICES.len()));
         }
     }
 
@@ -314,7 +312,7 @@ fn setup(
 
         let mut rng = thread_rng();
 
-        spawn_object(&mut commands, &mut materials, &mut meshes, generate_asteroid_object(), Transform::from_xyz(400.0 * rng.gen::<f32>() - 200.0, 400.0 * rng.gen::<f32>() - 200.0, 0.0));
+        let asteroid_id = spawn_object(&mut commands, &mut materials, &mut meshes, generate_asteroid_object(), Transform::from_xyz(400.0 * rng.gen::<f32>() - 200.0, 400.0 * rng.gen::<f32>() - 200.0, 0.0));
     }
 
 }
