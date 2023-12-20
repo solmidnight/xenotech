@@ -60,6 +60,13 @@ impl Cell {
             Self::Thruster(_) => [0.0, 0.0, 0.8, 1.0],
         }
     }
+    fn mass(&self) -> f32 {
+        match self {
+            Self::Metal => 1.0,
+            Self::Stone => 0.0001,
+            Self::Thruster(_) => 0.4,
+        }
+    }
 }
 
 #[derive(Component, Default)]
@@ -94,6 +101,18 @@ impl Object {
     }
     fn size(&self) -> UVec2 {
         (self.maximum - self.minimum).as_uvec2()
+    }
+    fn total_mass(&self) -> f32 {
+        self.data.iter().map(|(_, c)| c.mass()).sum::<f32>()
+    }
+    fn center_of_mass(&self) -> Vec2 {
+        let mut pos_accum = Vec2::ZERO;
+        let mut mass_accum = 0.0;
+        for (pos, cell) in &self.data {
+            pos_accum += cell.mass() * pos.as_vec2();
+            mass_accum += cell.mass();
+        }
+        pos_accum / mass_accum
     }
 }
 
@@ -230,6 +249,9 @@ fn spawn_object(
         .spawn((
             Input::default(),
             RigidBody::Dynamic,
+            CenterOfMass(object.center_of_mass()),
+            Mass(object.total_mass()),
+            InverseMass(1.0 / object.total_mass()),
             object,
             collider.clone(),
             MaterialMesh2dBundle {
@@ -327,29 +349,103 @@ fn input(
     query1: Query<(&Parent, &Camera)>,
     mut query2: Query<&mut Input>,
     keys: Res<bevy::prelude::Input<KeyCode>>,
+    axes: Res<Axis<GamepadAxis>>,
+    buttons: Res<bevy::prelude::Input<GamepadButton>>,
+    gamepads: Option<Res<Gamepads>>,
 ) {
     let _ = keys;
     let (p, _) = query1.single();
 
     let mut i = query2.get_mut(p.get()).unwrap();
 
-    let mut d = Direction::default();
-    if keys.pressed(KeyCode::W) {
-        d |= Direction::UP;
-    }
-    if keys.pressed(KeyCode::S) {
-        d |= Direction::DOWN;
-    }
-    if keys.pressed(KeyCode::A) {
-        d |= Direction::LEFT;
-    }
-    if keys.pressed(KeyCode::D) {
-        d |= Direction::RIGHT;
-    }
-    i.direction = d.as_vec();
+    if let Some(gamepads) = gamepads {
+        for gamepad in gamepads.iter() {
+            let axis_lx = GamepadAxis {
+                gamepad, axis_type: GamepadAxisType::LeftStickX
+            };
+            let axis_ly = GamepadAxis {
+                gamepad, axis_type: GamepadAxisType::LeftStickY
+            };
+            if let (Some(x), Some(y)) = (axes.get(axis_lx), axes.get(axis_ly)) {
+                let left_stick_pos = Vec2::new(x, y);
 
-    i.rotate = keys.pressed(KeyCode::Q) as i32 as f32 - keys.pressed(KeyCode::E) as i32 as f32;
+                if left_stick_pos.length() > 0.05 {
+                    i.direction = left_stick_pos;
+                } else {
+                    i.direction = Vec2::ZERO;
+                }
+            }
+            let left_bumper = GamepadButton {
+                gamepad, button_type: GamepadButtonType::LeftTrigger
+            };
+            let right_bumper = GamepadButton {
+                gamepad, button_type: GamepadButtonType::RightTrigger
+            };
+            i.rotate = if buttons.pressed(left_bumper) {
+                1.0
+            } else {
+                0.0 
+            } + if buttons.pressed(right_bumper) {
+                -1.0
+            } else {
+                0.0
+            };
+        }
+    } else {
+            let mut d = Direction::default();
+            if keys.pressed(KeyCode::W) {
+                d |= Direction::UP;
+            }
+            if keys.pressed(KeyCode::S) {
+                d |= Direction::DOWN;
+            }
+            if keys.pressed(KeyCode::A) {
+                d |= Direction::LEFT;
+            }
+            if keys.pressed(KeyCode::D) {
+                d |= Direction::RIGHT;
+            }
+            i.direction = d.as_vec();
+        
+            i.rotate = keys.pressed(KeyCode::Q) as i32 as f32 - keys.pressed(KeyCode::E) as i32 as f32;
+    }
 }
+
+#[derive(Component)]
+pub struct CenterOfMass(Vec2);
+#[derive(Component)]
+pub struct Mass(f32);
+#[derive(Component)]
+pub struct LinearVelocity(Vec2);
+#[derive(Component)]
+pub struct AngularVelocity(f32);
+#[derive(Component)]
+pub struct ExternalForce(Vec3);
+#[derive(Component)]
+pub struct ExternalTorque(f32);
+#[derive(Component)]
+pub struct Pos(Vec2);
+#[derive(Component)]
+pub struct PrevPos(Vec2);
+
+pub const TICK: f32 = 1.0 / 40.0;
+
+fn simulate(mut query: Query<(&mut Pos, &mut PrevPos)>) {
+    for (mut pos, mut prev_pos) in query.iter_mut() {
+        let velocity = (pos.0 - prev_pos.0) / TICK;
+        prev_pos.0 = pos.0;
+        pos.0 = pos.0 + velocity * TICK;
+    }
+}
+
+fn sync_transforms(mut query: Query<(&mut Transform, &Pos)>) {
+    for (mut transform, pos) in query.iter_mut() {
+        transform.translation = pos.0.extend(0.);
+    }
+}
+
+
+
 
 fn thruster_alloc(
     mut query: Query<(
@@ -357,13 +453,15 @@ fn thruster_alloc(
         &Input,
         &GlobalTransform,
         &CenterOfMass,
+        &Mass,
         &mut LinearVelocity,
         &mut AngularVelocity,
         &mut ExternalForce,
         &mut ExternalTorque,
     )>,
 ) {
-    for (o, i, t, com, mut v, mut a, mut ef, mut et) in query.iter_mut() {
+    for (o, i, t, com, m, mut v, mut a, mut ef, mut et) in query.iter_mut() {
+        dbg!(m);
         let r = t.to_scale_rotation_translation().1;
 
         let mut available_thrusters = HashMap::new();
